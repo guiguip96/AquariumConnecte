@@ -1,111 +1,239 @@
+#include <Arduino.h>
 #include <WiFiManager.h>
-#include <WebServer.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <SPIFFS.h>
+#include <SPI.h>
 #include <Wire.h>
+#include <Onewire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_I2CDevice.h>
+#include <Adafruit_SPIDevice.h>
+#include <DallasTemperature.h>
 
+#define Webserver_H
+#define SCREEN_WIDTH 128                                            // OLED display width, in pixels
+#define SCREEN_HEIGHT 64                                            // OLED display height, in pixels
+#define Pompe 27
 
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
-// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+WiFiManager wm;                                                     // Instance WiFiManager
+OneWire oneWire(25);                                                // Indique que la sonde est connectée sur la pin 25 de l'ESP
+AsyncWebServer server(80);                                          // Port utilisé pour le serveur hébergé sur l'ESP
+DallasTemperature sensors(&oneWire);                                // Lecture des données de la sonde sur la pin 25 de l'ESP
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);   // Déclaration de l'écran OLED
 
-WiFiManager wm;
-const char* ssid = "ESP-GUIGUI";
-const char* password = "Patate123";
-WebServer server(80);
+const int LED = 2;                                                  //La PIN GPIO de la LED
+const char* ssid = "GuiguiAquarium";                                //Info de connection pour le wifi
+const char* password = "InfoAutomne2020$";                          //Info de connection pour le wifi
+String paramNomAquarium = "Test";                                   //Nom défini sur l'interface web
+int paramTemperatureMin = 0;                                        //Température minimale définie sur l'interface web
+int paramTemperatureMax = 0;                                        //Température maximale définie sur l'interface web   
+int paramDureePompe = 0;   
+int paramTimerPompe = 0;                                            //Nombre de millisecondes pour laquelle la pompe doit s'activer
+bool etatPompe;                                                     //Indicateur servant à annoncer si la température se trouve dans le bon range
+int previousMillis = 0;
 
-void handleRoot()
+// Fonction qui permet d'aller chercher une température en celsius avec le senseur.
+float demanderTemperature()
 {
-    String page = "<!DOCTYPE html>";
-    page += "<html>";
-    page += "<head>";
-    page += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-    page += "<style>";
-    page += ".tab {overflow: hidden;display:flex;justify-content:space-around;width:100%;}";
-    page += ".tab button:hover {background-color: #ddd;}";
-    page += ".tab button.active {background-color: #ccc;}";
-    page += ".tabcontent {padding: 6px 12px;border: 1px solid #ccc;border-top: none;background-color:rgba(255,255,255,0.8);}";
-    page += "body {";
-    page += "background-image: url('http://getwallpapers.com/wallpaper/full/b/e/9/280762.jpg');}";
-    page += "</style>";
-    page += "</head>";
-    page += "<body>";
-    page += "<h2 class='tab'>Panneau de controle</h2>";
-    page += "<p class='tab'>Aquarium</p>";
-    page += "<div id='Temperature' class='tabcontent'>";
-    page += "<h3>Ecart de temperature desiree :</h3>";
-    page += "<input type='text' placeholder='De'>";
-    page += "<input type='text' placeholder='A'>";
-    page += "</div><br>";
-    page += "<div id='Pompe' class='tabcontent'>";
-    page += "<h3>Cadence de la pompe, aux 500 secondes :</h3>";
-    page += "<input type='text' placeholder='Durée en secondes'>";
-    page += "</div><br>";
-    page += "<div id='Affichage' class='tabcontent'>";
-    page += "<h3>Informations a afficher sur l'ecran :</h3>";
-    page += "<input type='text' placeholder='Nom du bocal'>";
-    page += "<input type='text' placeholder='Couleur du texte'>";
-    page += "</div>";
-    page += "</body>";
-    page += "</html>";
-
-    server.send(200, "text/html", page);
+  sensors.requestTemperatures();
+  return sensors.getTempCByIndex(0);
 }
 
-void handleNotFound()
+// Fonction qui vérifie si la pompe doit s'activer et pour quelle durée
+void verifierPompe()
 {
-    server.send(404, "text/plain", "404: Not found");
+  unsigned long currentMillis = millis();
+  unsigned long timingPompe = paramTimerPompe * 1000;
+  unsigned long dureePompe = paramDureePompe * 1000;
+
+  if(currentMillis - previousMillis >= timingPompe)
+  {
+    previousMillis = currentMillis;
+
+    if(etatPompe == false)
+    {
+      etatPompe = true;
+      digitalWrite(Pompe, HIGH);
+      delay(dureePompe);
+    }
+    else
+    {
+      etatPompe = false;
+      digitalWrite(Pompe, LOW);
+    }
+  }
 }
 
-void setup()
+// Vérifie si la température est dans le range requis. Si non, la LED s'allume.
+void verifierTemperature()
 {
+  Serial.print(demanderTemperature());
 
-    WiFi.mode(WIFI_STA);
-    Serial.begin(9600);
-    delay(1000);
-	Serial.println("\n");
+  if (demanderTemperature() <= paramTemperatureMax && demanderTemperature() >= paramTemperatureMin)
+    digitalWrite(LED, LOW);
+  else
+    digitalWrite(LED, HIGH);
+}
 
-if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+// Fonction qui permet d'afficher les informations sur l'OLED
+void afficherOLED()
+{
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+
+  display.setCursor(0, 0);
+  display.print("Nom: ");
+  display.println(paramNomAquarium);
+
+  display.setCursor(0, 20);
+  display.println("Temp. actuelle (C): ");
+  display.println(String(demanderTemperature()));
+
+  display.setCursor(0, 40);
+  display.println("Adresse IP : ");
+  display.println(WiFi.localIP().toString());
+  display.display();
+}
+
+void notFound(AsyncWebServerRequest *request)
+{
+  request->send(404, "text/plain", "Not found");
+}
+
+void setup() {
+
+  Serial.begin(9600);                                               //Initialisation du serial monitor
+  pinMode(LED, OUTPUT);                                        //Définition de la LED en OUTPUT
+  pinMode(Pompe, OUTPUT);
+
+  //Initialisation de l'OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+  { 
     Serial.println(F("SSD1306 allocation failed"));
-    for(;;);}
+    for (;;)
+      ;
+  }
+  delay(2000);
 
-	
-	if(!wm.autoConnect(ssid, password))
-		Serial.println("Erreur de connexion.");
-	else
-		Serial.println("Connexion etablie!");
-
-    Serial.println("\n");
+  // Initialisation du WiFi-Manager
+  WiFi.mode(WIFI_STA);
+  if (!wm.autoConnect(ssid, password))
+    Serial.println("Erreur de connexion.");
+  else
     Serial.println("Connexion etablie!");
-    Serial.print("Adresse IP: ");
-    Serial.println(WiFi.localIP());
 
-    server.on("/", handleRoot);
-    server.onNotFound(handleNotFound);
-    server.begin();
+  Serial.println();
+  Serial.print("Adresse IP: ");
+  Serial.println(WiFi.localIP());
 
-    Serial.println("Serveur web actif!");
+  // Initialisaton du senseur de température
+  sensors.begin();
 
-    delay(2000);
-    display.clearDisplay();
+  // Initialisation du SPIFFS
+  if (!SPIFFS.begin(true))
+  {
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
 
-    display.setTextSize(1);
-    display.setTextColor(WHITE);
-    display.setCursor(0, 40);
-    // Display static text
-    display.println("IP: 192.168.0.121");
-        display.setCursor(0, 20);
-    // Display static text
-    display.println("Aquarium de Guigui");
-            display.setCursor(0, 50);
-    // Display static text
-    display.println("Temp: 15 C");
-    display.display(); 
+  server.onNotFound(notFound);
 
+  // Envoie la page d'accueil
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) 
+  {
+    request->send(SPIFFS, "/indexFR.html", "text/html");
+  });
+
+  // Envoie la page francophone
+  server.on("/indexFR.html", HTTP_GET, [](AsyncWebServerRequest *request) 
+  {
+    request->send(SPIFFS, "/indexFR.html", "text/html");
+  });
+
+  // Envoie la page anglophone
+  server.on("/indexEN.html", HTTP_GET, [](AsyncWebServerRequest *request) 
+  {
+    request->send(SPIFFS, "/indexEN.html", "text/html");
+  });
+
+  //Envoie la page de style
+  server.on("/w3.css", HTTP_GET, [](AsyncWebServerRequest *request) 
+  {
+    request->send(SPIFFS, "/w3.css", "text/css");
+  });
+
+  //Envoie la page de sripts
+  server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request) 
+  {
+    request->send(SPIFFS, "/script.js", "text/javascript");
+  });
+
+  //Envoie le jQuery
+  server.on("/jquery-3.5.1.min.js", HTTP_GET, [](AsyncWebServerRequest *request) 
+  {
+    request->send(SPIFFS, "/jquery-3.5.1.min.js", "text/javascript");
+  });
+
+  //Reçoit le nom de notre interface web
+  server.on("/inputNomAquarium", HTTP_POST, [](AsyncWebServerRequest *request) 
+  {
+    
+    if(request->hasParam("proprieteNom", true))
+    {
+      String nomAquarium;
+      nomAquarium = request->getParam("proprieteNom", true)->value();
+      paramNomAquarium = nomAquarium;
+    }
+    request->send(204, "Le nom a été mis a jour");
+  });
+
+  //Reçoit les températures de notre interface web
+  server.on("/inputTempAquarium", HTTP_POST, [](AsyncWebServerRequest *request) 
+  {
+    String tempMinAquarium;
+    String tempMaxAquarium;
+    if(request->hasParam("proprieteTempMin", true) && request->hasParam("proprieteTempMax", true))
+    {
+      tempMinAquarium = request->getParam("proprieteTempMin", true)->value();
+      tempMaxAquarium = request->getParam("proprieteTempMax", true)->value();
+      paramTemperatureMin = tempMinAquarium.toInt();
+      paramTemperatureMax = tempMaxAquarium.toInt();
+    }
+    request->send(204, "La température a été mise a jour");
+  });
+
+  //Reçoit les infos de la pompe de notre interface web
+  server.on("/inputPompeAquarium", HTTP_POST, [](AsyncWebServerRequest *request) 
+  {
+    String pompeDureeAquarium;
+    String pompeTimerAquarium;
+    if(request->hasParam("proprietePompeDuree", true) && request->hasParam("proprietePompeTimer", true))
+    {
+      pompeDureeAquarium = request->getParam("proprietePompeDuree", true)->value();
+      pompeTimerAquarium = request->getParam("proprietePompeTimer", true)->value();
+      paramDureePompe = pompeDureeAquarium.toInt();
+      paramTimerPompe = pompeTimerAquarium.toInt();
+    }
+    request->send(204, "La pompe a été mise a jour");
+  });
+
+  
+  // Fonction qui démarre le serveur local
+  server.begin();
 }
 
-void loop()
-{
-    server.handleClient();
+
+void loop() {
+  // Vérifie les états pour la plaque chauffante et la pompe
+  verifierTemperature();
+  verifierPompe();
+
+  Serial.println(paramDureePompe);
+  Serial.println(paramTimerPompe);
+
+  // Fonction qui permet d'afficher les informations sur l'OLED
+  afficherOLED();
 }

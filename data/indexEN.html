@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+ 
+<head>
+    <title>Aquarium Project</title>
+    <link rel="stylesheet" type="text/css" href="w3.css">
+    <script type="text/javascript" src="jquery-3.5.1.min.js"></script>
+    <script type="text/javascript" src="script.js"></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1"charset="UTF-8" />
+</head>
+
+<body class="w3-animate-opacity">
+    <div class="w3-card w3-blue w3-padding-small w3-center" style="margin-bottom:25px;">
+        <h1>Aquarium Project</h1>
+        <nav>
+            <a href="indexFR.html">FR</a> | <a href="indexEN.html">EN</a>
+        </nav>
+    </div>
+    <div style="width: 100%; border: 3px groove;">
+        <form action="/post" target="hidden-form" style="padding: 0 20px 20px 20px;height:250px;">
+            <h2>Aquarium name:</h2>
+            <input type="text" id="inputNomAquarium" name="inputNomAquarium">
+            <input type="submit" id="appliquerNom" value="Apply">
+        </form>
+    </div>
+    <div style="float: left; width: 50%; border: 3px groove;">
+        <form action="/post" target="hidden-form" style="padding: 0 20px 20px 20px; height:250px;">
+            <h2>Desired temp. (C) :</h2>
+            From <input type="number" min="24" max="32" id="inputTempMin" name="inputTemperatureMin"> to <input type="number" min="24" max="32" id="inputTempMax" name="inputTemperatureMax">
+            <br><br>
+            <input type="submit" id="appliquerTemp" value="Apply">
+        </form>
+    </div>
+    <div style="float: left;width: 50%; border: 3px groove;">
+        <form action="/get" target="hidden-form" style="padding: 0 20px 20px 20px;height:250px;">
+            <h2>Pump :</h2>
+            Activated for <input type="number" id="inputPompeTimer" name="inputPompeTimer" style="width: 75px;"> seconds, every <input type="number" id="inputPompeDuree" name="inputPompeDuree" style="width: 75px;"> seconds. 
+            <br><br>
+            <input type="submit" id="appliquerPompe" value="Apply">
+        </form>
+    </div>
+    <iframe style="display:none" name="hidden-form"></iframe>
+</body>
+</html>
